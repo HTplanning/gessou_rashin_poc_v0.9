@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>月相羅針 計算PoC v0.9｜画面デザイン調整版</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='0.9') }}">
+</head>
+<body>
+  <main id="app" class="page-shell" v-cloak>
+    <header class="hero">
+      <p class="brand-line">SHUNKA PROJECT / PoC v0.9</p>
+      <h1 class="hero-title">月相羅針</h1>
+      <p class="hero-description">
+        出生日時から太陽と月の位置を実計算し、<br class="sp-hide">角度差を暫定8分類へ判定します。
+      </p>
+      <p class="hero-subnote">
+        出生時間が不明な場合は、出生日全体の候補を確認できます。
+      </p>
+    </header>
+
+    <section class="card section-card">
+      <div class="section-heading">
+        <div class="section-badge" aria-hidden="true">01</div>
+        <div class="section-heading-copy">
+          <h2>出生情報を入力</h2>
+          <p>PoC v0.9では日本国内出生を対象とし、タイムゾーンは Asia/Tokyo 固定です。</p>
+        </div>
+      </div>
+
+      <div v-if="errors.length" class="error-box" role="alert">
+        <strong>入力または計算内容を確認してください。</strong>
+        <ul>
+          <li v-for="error in errors" :key="error" v-text="error"></li>
+        </ul>
+      </div>
+
+      <form class="birth-form" autocomplete="off" novalidate @submit.prevent="calculate" @reset.prevent="resetForm">
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">生年月日 <em class="field-tag required-tag">必須</em></span>
+            <input
+              type="date"
+              name="birth_date"
+              v-model="form.birth_date"
+              autocomplete="off"
+              required
+              @pointerdown="primeCurrentValue('birth_date', $event)"
+              @focus="primeCurrentValue('birth_date', $event)"
+            >
+          </label>
+
+          <label class="field">
+            <span class="field-label">出生時間 <em class="field-tag optional-tag">任意</em></span>
+            <input
+              type="time"
+              name="birth_time"
+              v-model="form.birth_time"
+              autocomplete="off"
+              @pointerdown="primeCurrentValue('birth_time', $event)"
+              @focus="primeCurrentValue('birth_time', $event)"
+            >
+            <small>出生時間が分からない場合は、空欄のままで構いません。</small>
+          </label>
+
+          <label class="field full-width">
+            <span class="field-label">出生地 <em class="field-tag required-tag">必須</em></span>
+            <input
+              type="text"
+              name="birth_place"
+              v-model="form.birth_place"
+              placeholder="例：兵庫県小野市"
+              autocomplete="off"
+              required
+            >
+            <small>出生地は記録・表示に使用します。PoC v0.9では日本標準時として計算します。</small>
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button type="submit" class="primary-button" :disabled="loading" :aria-busy="loading ? 'true' : 'false'">
+            <span v-text="loading ? '計算中...' : '月相羅針を計算する'"></span>
+          </button>
+          <button type="reset" class="secondary-button" :disabled="loading">入力をクリア</button>
+        </div>
+      </form>
+    </section>
+
+    <section v-if="result" class="card section-card result-section" aria-live="polite">
+      <div class="section-heading">
+        <div class="section-badge" aria-hidden="true">02</div>
+        <div class="section-heading-copy">
+          <h2>計算結果</h2>
+          <p>Vue.js で結果表示を更新し、Python の計算結果をそのまま表示します。</p>
+        </div>
+      </div>
+
+      <template v-if="result.birth_time_known">
+        <div class="phase-hero">
+          <div class="phase-badge-large" v-text="result.phase_id"></div>
+          <div class="phase-summary">
+            <p class="phase-overline">月相羅針（PoC暫定8分類）</p>
+            <h3 v-text="result.phase_name"></h3>
+            <p class="phase-range" v-text="result.phase_range"></p>
+            <p class="phase-english" v-text="result.phase_english_name"></p>
+          </div>
+          <span class="status-pill exact">exact</span>
+        </div>
+
+        <div class="metric-grid four-up">
+          <article class="metric-card">
+            <p class="metric-label">太陽黄経</p>
+            <p class="metric-value"><span v-text="formatNumber(result.sun_longitude)"></span><span class="metric-unit">°</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">月黄経</p>
+            <p class="metric-value"><span v-text="formatNumber(result.moon_longitude)"></span><span class="metric-unit">°</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">角度差（月－太陽）</p>
+            <p class="metric-value"><span v-text="formatNumber(result.angle_difference)"></span><span class="metric-unit">°</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">UTC変換</p>
+            <p class="metric-value text-metric" v-text="result.utc_datetime"></p>
+          </article>
+        </div>
+
+        <div class="panel-grid two-up">
+          <section class="info-panel">
+            <h3>PoC確認用データ</h3>
+            <dl class="info-list">
+              <div><dt>出生データ</dt><dd v-text="result.birth_data"></dd></div>
+              <div><dt>出生地</dt><dd v-text="result.birth_place"></dd></div>
+              <div><dt>タイムゾーン</dt><dd v-text="result.timezone"></dd></div>
+              <div><dt>UTC日時</dt><dd v-text="result.utc_datetime"></dd></div>
+              <div><dt>Julian Day UT</dt><dd v-text="formatNumber(result.julian_day)"></dd></div>
+              <div><dt>計算エンジン</dt><dd v-text="result.ephemeris_mode"></dd></div>
+              <div><dt>出生地処理</dt><dd v-text="result.location_scope"></dd></div>
+              <div><dt>座標</dt><dd v-text="coordinatesText(result)"></dd></div>
+              <div><dt>判定ロジック版</dt><dd v-text="result.logic_version"></dd></div>
+            </dl>
+          </section>
+
+          <section class="info-panel emphasis-panel">
+            <h3>月相の説明（PoC用）</h3>
+            <p v-text="result.phase_description"></p>
+            <p class="note-line"><strong>注意：</strong><span v-text="result.phase_note"></span></p>
+          </section>
+        </div>
+
+        <section class="important-panel">
+          <h3>重要</h3>
+          <p>PoC技術検証用の暫定8分類です。正式な月相羅針名称・説明ではありません。</p>
+        </section>
+      </template>
+
+      <template v-else-if="result.classification_status === 'stable'">
+        <div class="phase-hero">
+          <div class="phase-badge-large" v-text="result.possible_phases[0].id"></div>
+          <div class="phase-summary">
+            <p class="phase-overline">月相羅針（PoC暫定8分類）</p>
+            <h3 v-text="result.possible_phases[0].name"></h3>
+            <p class="phase-range">出生時間不明でも、一日を通して同じ分類でした。</p>
+            <p class="phase-english" v-text="result.possible_phases[0].rangeText"></p>
+          </div>
+          <span class="status-pill stable">stable</span>
+        </div>
+
+        <div class="metric-grid four-up">
+          <article class="metric-card">
+            <p class="metric-label">確認時刻範囲</p>
+            <p class="metric-value text-metric" v-text="result.check_period"></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">確認点数</p>
+            <p class="metric-value"><span v-text="result.sample_count"></span><span class="metric-unit">点</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">角度差（00:00）</p>
+            <p class="metric-value"><span v-text="formatNumber(result.start_angle_difference)"></span><span class="metric-unit">°</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">角度差（23:59:59）</p>
+            <p class="metric-value"><span v-text="formatNumber(result.end_angle_difference)"></span><span class="metric-unit">°</span></p>
+          </article>
+        </div>
+
+        <div class="panel-grid two-up">
+          <section class="info-panel">
+            <h3>PoC確認用データ</h3>
+            <dl class="info-list">
+              <div><dt>出生日</dt><dd v-text="result.birth_date"></dd></div>
+              <div><dt>出生地</dt><dd v-text="result.birth_place"></dd></div>
+              <div><dt>タイムゾーン</dt><dd v-text="result.timezone"></dd></div>
+              <div><dt>確認間隔</dt><dd><span v-text="result.sample_interval_minutes"></span>分刻み＋23:59:59</dd></div>
+              <div><dt>計算エンジン</dt><dd v-text="result.ephemeris_mode"></dd></div>
+              <div><dt>出生地処理</dt><dd v-text="result.location_scope"></dd></div>
+              <div><dt>座標</dt><dd v-text="coordinatesText(result)"></dd></div>
+              <div><dt>判定ロジック版</dt><dd v-text="result.logic_version"></dd></div>
+            </dl>
+          </section>
+
+          <section class="info-panel emphasis-panel">
+            <h3>出生時間不明時の扱い</h3>
+            <p v-text="result.unknown_time_note"></p>
+            <p class="note-line"><strong>候補分類：</strong><span v-text="result.possible_phases[0].name"></span>（<span v-text="result.possible_phases[0].rangeText"></span>）</p>
+            <p class="note-line"><strong>注意：</strong>仮の正午などを出生時刻として設定し、1区分に確定する処理は行っていません。</p>
+          </section>
+        </div>
+
+        <section class="important-panel">
+          <h3>重要</h3>
+          <p>PoC技術検証用の暫定8分類です。正式な月相羅針名称・説明ではありません。</p>
+        </section>
+      </template>
+
+      <template v-else>
+        <div class="phase-hero ambiguous-hero">
+          <div class="phase-badge-large">?</div>
+          <div class="phase-summary">
+            <p class="phase-overline">月相羅針（PoC暫定8分類）</p>
+            <h3>複数候補があります</h3>
+            <p class="phase-range">出生時間が不明なため、一意に確定できません。</p>
+            <p class="phase-english">候補カードから、該当する可能性のある区分を確認してください。</p>
+          </div>
+          <span class="status-pill ambiguous">ambiguous</span>
+        </div>
+
+        <div class="metric-grid four-up">
+          <article class="metric-card">
+            <p class="metric-label">確認時刻範囲</p>
+            <p class="metric-value text-metric" v-text="result.check_period"></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">確認点数</p>
+            <p class="metric-value"><span v-text="result.sample_count"></span><span class="metric-unit">点</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">角度差（00:00）</p>
+            <p class="metric-value"><span v-text="formatNumber(result.start_angle_difference)"></span><span class="metric-unit">°</span></p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">角度差（23:59:59）</p>
+            <p class="metric-value"><span v-text="formatNumber(result.end_angle_difference)"></span><span class="metric-unit">°</span></p>
+          </article>
+        </div>
+
+        <section class="candidate-panel">
+          <h3>候補一覧</h3>
+          <div class="candidate-list">
+            <article v-for="(phase, index) in result.possible_phases" :key="phase.id" class="candidate-card">
+              <div class="candidate-header">
+                <div class="candidate-phase-badge" v-text="phase.id"></div>
+                <div>
+                  <p class="candidate-label" v-text="candidateLabel(index)"></p>
+                  <h4><span v-text="phase.name"></span></h4>
+                  <p class="candidate-english" v-text="phase.englishName"></p>
+                </div>
+              </div>
+              <p class="candidate-range">技術検証用区分：<span v-text="phase.rangeText"></span></p>
+              <p class="candidate-description" v-text="phase.description"></p>
+            </article>
+          </div>
+          <div class="guidance-box">
+            正確な出生時間が分かる場合は、出生時間を再入力すると1つの区分として計算できます。
+          </div>
+        </section>
+
+        <div class="panel-grid two-up">
+          <section class="info-panel">
+            <h3>PoC確認用データ</h3>
+            <dl class="info-list">
+              <div><dt>出生日</dt><dd v-text="result.birth_date"></dd></div>
+              <div><dt>出生地</dt><dd v-text="result.birth_place"></dd></div>
+              <div><dt>タイムゾーン</dt><dd v-text="result.timezone"></dd></div>
+              <div><dt>確認間隔</dt><dd><span v-text="result.sample_interval_minutes"></span>分刻み＋23:59:59</dd></div>
+              <div><dt>計算エンジン</dt><dd v-text="result.ephemeris_mode"></dd></div>
+              <div><dt>出生地処理</dt><dd v-text="result.location_scope"></dd></div>
+              <div><dt>座標</dt><dd v-text="coordinatesText(result)"></dd></div>
+              <div><dt>判定ロジック版</dt><dd v-text="result.logic_version"></dd></div>
+            </dl>
+          </section>
+
+          <section class="info-panel emphasis-panel">
+            <h3>出生時間不明時の扱い</h3>
+            <p v-text="result.unknown_time_note"></p>
+            <p class="note-line"><strong>判定状態：</strong><span v-text="statusLabel(result.classification_status)"></span></p>
+            <p class="note-line"><strong>注意：</strong>仮の正午などを出生時刻として設定し、1区分に確定する処理は行っていません。</p>
+          </section>
+        </div>
+
+        <section class="important-panel">
+          <h3>重要</h3>
+          <p>PoC技術検証用の暫定8分類です。正式な月相羅針名称・説明ではありません。</p>
+        </section>
+      </template>
+    </section>
+
+    <footer class="page-footer">
+      <p>月相羅針 計算PoC v0.9｜正式占術仕様を確定するものではありません。</p>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="{{ url_for('static', filename='app.js', v='0.9') }}"></script>
+</body>
+</html>
